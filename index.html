@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mermaid Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; background: #1e1e2e; color: #cdd6f4; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #181825; border-bottom: 1px solid #313244; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .toolbar { display: flex; gap: 8px; }
+    .toolbar button, .toolbar select { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+    .toolbar button:hover { background: #45475a; }
+    .container { display: flex; flex: 1; overflow: hidden; }
+    .editor-pane, .preview-pane { flex: 1; display: flex; flex-direction: column; }
+    .editor-pane { border-right: 1px solid #313244; }
+    .pane-header { padding: 6px 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #a6adc8; background: #1e1e2e; border-bottom: 1px solid #313244; }
+    textarea { flex: 1; resize: none; background: #1e1e2e; color: #cdd6f4; border: none; padding: 16px; font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; outline: none; tab-size: 2; }
+    .preview-pane { background: #fff; overflow: auto; }
+    .preview-pane .pane-header { background: #f5f5f5; color: #666; border-bottom: 1px solid #ddd; }
+    #preview { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: auto; }
+    #preview svg { max-width: 100%; height: auto; }
+    .error { color: #f38ba8; padding: 16px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+    .status { font-size: 12px; color: #a6adc8; padding: 4px 16px; background: #181825; border-top: 1px solid #313244; text-align: right; }
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #1e1e2e; border: 1px solid #45475a; border-radius: 10px; padding: 20px; width: 420px; max-height: 70vh; display: flex; flex-direction: column; }
+    .modal h2 { font-size: 15px; margin-bottom: 12px; }
+    .modal input[type="text"] { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 8px 10px; font-size: 13px; width: 100%; outline: none; margin-bottom: 12px; }
+    .modal input[type="text"]:focus { border-color: #89b4fa; }
+    .diagram-list { flex: 1; overflow-y: auto; margin-bottom: 12px; }
+    .diagram-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .diagram-item:hover { background: #313244; }
+    .diagram-item.active { background: #45475a; }
+    .diagram-item .meta { color: #a6adc8; font-size: 11px; }
+    .diagram-item button { background: none; border: none; color: #f38ba8; cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; opacity: 0.6; }
+    .diagram-item button:hover { opacity: 1; background: rgba(243,139,168,0.15); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal-actions button { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .modal-actions button:hover { background: #45475a; }
+    .modal-actions button.primary { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+    .modal-actions button.primary:hover { background: #74c7ec; }
+    .empty-msg { color: #a6adc8; font-size: 13px; text-align: center; padding: 20px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mermaid Editor</h1>
+    <div class="toolbar">
+      <select id="examples">
+        <option value="">Load example...</option>
+        <option value="flowchart">Flowchart</option>
+        <option value="sequence">Sequence Diagram</option>
+        <option value="class">Class Diagram</option>
+        <option value="state">State Diagram</option>
+        <option value="er">ER Diagram</option>
+        <option value="gantt">Gantt Chart</option>
+        <option value="pie">Pie Chart</option>
+        <option value="git">Git Graph</option>
+      </select>
+      <button onclick="openSaveModal()">Save</button>
+      <button onclick="openLoadModal()">Load</button>
+      <button onclick="importMMD()">Import .mmd</button>
+      <button onclick="exportMMD()">Export .mmd</button>
+      <button onclick="exportSVG()">Export SVG</button>
+      <button onclick="exportPNG()">Export PNG</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="editor-pane">
+      <div class="pane-header">Editor</div>
+      <textarea id="editor" spellcheck="false">graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Do something]
+    B -->|No| D[Do something else]
+    C --> E[End]
+    D --> E</textarea>
+    </div>
+    <div class="preview-pane">
+      <div class="pane-header">Preview</div>
+      <div id="preview"></div>
+    </div>
+  </div>
+  <div class="status" id="status">Ready</div>
+
+  <!-- Save Modal -->
+  <div class="modal-overlay" id="saveModal">
+    <div class="modal">
+      <h2>Save Diagram</h2>
+      <input type="text" id="saveName" placeholder="Diagram name..." autocomplete="off">
+      <div class="modal-actions">
+        <button onclick="closeSaveModal()">Cancel</button>
+        <button class="primary" onclick="saveDiagram()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load Modal -->
+  <div class="modal-overlay" id="loadModal">
+    <div class="modal">
+      <h2>Saved Diagrams</h2>
+      <div class="diagram-list" id="diagramList"></div>
+      <div class="modal-actions">
+        <button onclick="closeLoadModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+
+    const STORAGE_KEY = 'mermaid-diagrams';
+    const AUTOSAVE_KEY = 'mermaid-autosave';
+
+    const editor = document.getElementById('editor');
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    let debounceTimer;
+
+    // Restore last session
+    const autosaved = localStorage.getItem(AUTOSAVE_KEY);
+    if (autosaved) editor.value = autosaved;
+
+    const examples = {
+      flowchart: `graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Do something]
+    B -->|No| D[Do something else]
+    C --> E[End]
+    D --> E`,
+      sequence: `sequenceDiagram
+    participant Alice
+    participant Bob
+    Alice->>John: Hello John, how are you?
+    loop Health check
+        John->>John: Fight against hypochondria
+    end
+    Note right of John: Rational thoughts!
+    John-->>Alice: Great!
+    John->>Bob: How about you?
+    Bob-->>John: Jolly good!`,
+      class: `classDiagram
+    Animal <|-- Duck
+    Animal <|-- Fish
+    Animal <|-- Zebra
+    Animal : +int age
+    Animal : +String gender
+    Animal: +isMammal()
+    Animal: +mate()
+    class Duck{
+        +String beakColor
+        +swim()
+        +quack()
+    }
+    class Fish{
+        -int sizeInFeet
+        -canEat()
+    }
+    class Zebra{
+        +bool is_wild
+        +run()
+    }`,
+      state: `stateDiagram-v2
+    [*] --> Still
+    Still --> [*]
+    Still --> Moving
+    Moving --> Still
+    Moving --> Crash
+    Crash --> [*]`,
+      er: `erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE-ITEM : contains
+    CUSTOMER }|..|{ DELIVERY-ADDRESS : uses`,
+      gantt: `gantt
+    title A Gantt Diagram
+    dateFormat YYYY-MM-DD
+    section Section
+        A task          :a1, 2024-01-01, 30d
+        Another task    :after a1, 20d
+    section Another
+        Task in Another :2024-01-12, 12d
+        Another task    :24d`,
+      pie: `pie title Pets adopted by volunteers
+    "Dogs" : 386
+    "Cats" : 85
+    "Rats" : 15`,
+      git: `gitGraph
+    commit
+    commit
+    branch develop
+    checkout develop
+    commit
+    commit
+    checkout main
+    merge develop
+    commit
+    commit`
+    };
+
+    document.getElementById('examples').addEventListener('change', (e) => {
+      if (e.target.value && examples[e.target.value]) {
+        editor.value = examples[e.target.value];
+        render();
+      }
+      e.target.value = '';
+    });
+
+    async function render() {
+      const code = editor.value.trim();
+      if (!code) { preview.innerHTML = '<span class="error">Enter some Mermaid syntax</span>'; return; }
+      // Clean up any leftover mermaid error containers in the DOM
+      document.querySelectorAll('[id^="dmermaid-"]').forEach(el => el.remove());
+      document.querySelectorAll('.mermaid-error').forEach(el => el.remove());
+      try {
+        const { svg } = await mermaid.render('mermaid-' + Date.now(), code);
+        preview.innerHTML = svg;
+        status.textContent = 'Rendered successfully';
+      } catch (err) {
+        // Clean up error artifacts mermaid leaves behind
+        document.querySelectorAll('[id^="dmermaid-"]').forEach(el => el.remove());
+        preview.innerHTML = `<span class="error">${err.message || err}</span>`;
+        status.textContent = 'Syntax error';
+      }
+    }
+
+    editor.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        localStorage.setItem(AUTOSAVE_KEY, editor.value);
+        render();
+      }, 300);
+    });
+
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = editor.selectionStart;
+        editor.value = editor.value.substring(0, start) + '  ' + editor.value.substring(editor.selectionEnd);
+        editor.selectionStart = editor.selectionEnd = start + 2;
+      }
+    });
+
+    function getFullSvg() {
+      const svg = preview.querySelector('svg');
+      if (!svg) return null;
+      const clone = svg.cloneNode(true);
+      // Use viewBox for true dimensions, fall back to attributes, then BBox
+      let w, h;
+      const vb = clone.getAttribute('viewBox');
+      if (vb) {
+        const parts = vb.split(/[\s,]+/).map(Number);
+        w = parts[2];
+        h = parts[3];
+      } else {
+        const svgW = parseFloat(clone.getAttribute('width'));
+        const svgH = parseFloat(clone.getAttribute('height'));
+        if (svgW && svgH) { w = svgW; h = svgH; }
+        else { const bb = svg.getBBox(); w = bb.x + bb.width + 10; h = bb.y + bb.height + 10; }
+      }
+      clone.setAttribute('width', w);
+      clone.setAttribute('height', h);
+      if (!vb) clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+      // Inline styles so exported SVG renders standalone
+      clone.insertAdjacentHTML('afterbegin', '<style>* { font-family: system-ui, sans-serif; }</style>');
+      return { svg: clone, w, h };
+    }
+
+    window.importMMD = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.mmd,.mermaid,.md,.txt';
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          editor.value = ev.target.result;
+          localStorage.setItem(AUTOSAVE_KEY, editor.value);
+          render();
+          status.textContent = `Imported "${file.name}"`;
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    };
+
+    window.exportMMD = () => {
+      const code = editor.value;
+      if (!code.trim()) return;
+      const blob = new Blob([code], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'diagram.mmd';
+      a.click();
+    };
+
+    window.exportSVG = () => {
+      const result = getFullSvg();
+      if (!result) return;
+      const blob = new Blob([result.svg.outerHTML], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'diagram.svg';
+      a.click();
+    };
+
+    window.exportPNG = () => {
+      const result = getFullSvg();
+      if (!result) return;
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = result.w * scale;
+      canvas.height = result.h * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, result.w, result.h);
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'diagram.png';
+        a.click();
+      };
+      const svgData = new XMLSerializer().serializeToString(result.svg);
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    };
+
+    // --- Persistence ---
+    function getSavedDiagrams() {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    }
+
+    function setSavedDiagrams(diagrams) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(diagrams));
+    }
+
+    window.openSaveModal = () => {
+      document.getElementById('saveModal').classList.add('open');
+      const input = document.getElementById('saveName');
+      input.value = '';
+      input.focus();
+    };
+
+    window.closeSaveModal = () => {
+      document.getElementById('saveModal').classList.remove('open');
+    };
+
+    window.saveDiagram = () => {
+      const name = document.getElementById('saveName').value.trim();
+      if (!name) { document.getElementById('saveName').focus(); return; }
+      const diagrams = getSavedDiagrams();
+      diagrams[name] = { code: editor.value, savedAt: new Date().toISOString() };
+      setSavedDiagrams(diagrams);
+      closeSaveModal();
+      status.textContent = `Saved "${name}"`;
+    };
+
+    // Allow Enter to save
+    document.getElementById('saveName').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveDiagram();
+      if (e.key === 'Escape') closeSaveModal();
+    });
+
+    window.openLoadModal = () => {
+      const list = document.getElementById('diagramList');
+      const diagrams = getSavedDiagrams();
+      const names = Object.keys(diagrams).sort((a, b) => diagrams[b].savedAt.localeCompare(diagrams[a].savedAt));
+
+      if (names.length === 0) {
+        list.innerHTML = '<div class="empty-msg">No saved diagrams yet</div>';
+      } else {
+        list.innerHTML = names.map(name => {
+          const d = diagrams[name];
+          const date = new Date(d.savedAt).toLocaleString();
+          return `<div class="diagram-item" onclick="loadDiagram('${name.replace(/'/g, "\\'")}')">
+            <div><div>${name}</div><div class="meta">${date}</div></div>
+            <button onclick="event.stopPropagation(); deleteDiagram('${name.replace(/'/g, "\\'")}')">Delete</button>
+          </div>`;
+        }).join('');
+      }
+      document.getElementById('loadModal').classList.add('open');
+    };
+
+    window.closeLoadModal = () => {
+      document.getElementById('loadModal').classList.remove('open');
+    };
+
+    window.loadDiagram = (name) => {
+      const diagrams = getSavedDiagrams();
+      if (diagrams[name]) {
+        editor.value = diagrams[name].code;
+        localStorage.setItem(AUTOSAVE_KEY, editor.value);
+        render();
+        closeLoadModal();
+        status.textContent = `Loaded "${name}"`;
+      }
+    };
+
+    window.deleteDiagram = (name) => {
+      const diagrams = getSavedDiagrams();
+      delete diagrams[name];
+      setSavedDiagrams(diagrams);
+      openLoadModal(); // refresh list
+    };
+
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('open');
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>
